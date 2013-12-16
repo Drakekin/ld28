@@ -1,3 +1,12 @@
+var camera, scene, renderer, disk, height_map, cities, projector, voroni,
+    diagram, locator, time = 0, dialogue = false, city_name_banner = $("#namebanner"), 
+    status_banner = $("#statusbanner"), dialogue_banner = $("#dialoguebanner"),
+    home, fortress, port, player, advancing = 0, tickets = 1, daughter = false, help = 0,
+    scheduled_events = {};
+
+city_name_banner.hide();
+dialogue_banner.hide();
+
 var town_names = shuffle([
     "Verago", "Andialas", "Mola", "Cordecaya", "Villa", "Alcolar", "Pachorra", "Sago", "Cala", "Sevilla", "Greda", 
     "Murcife", "Tala", "Moste", "Ciutora", "Colmeria", "Arbavas", "Algelil", "Bari", "Adarrar", "Cartelda", 
@@ -120,7 +129,7 @@ function create_disk(textures) {
     );
 }
 
-function generate_cities(height_map, radius, n, tickets) {
+function generate_cities(height_map, radius, n, max_tickets) {
     var cities = [];
     for (var i = 0; i < n; i++) {
         var h = undefined, x = undefined, y = undefined, v;
@@ -135,17 +144,104 @@ function generate_cities(height_map, radius, n, tickets) {
                 }
             }
         }
-        cities.push({
+        var city = {
             name: town_names.pop(), 
             position: v, 
             height: h, 
             x: v.x, 
             y: v.y, 
             population: Math.floor(Math.random()*100)*100,
-            ticket: tickets > 0 && Math.random() > 0.5,
+            ticket: max_tickets > 0 && Math.random() > 0.5,
             friendliness: Math.random(),
             inquisition: Math.random() > 0.8
-        })
+        };
+        var options = [];
+        options.push({text: "Search for another ticket.", func: function () {
+            var duration = Math.random() * 24 + 12;
+            scheduled_events[time+duration] = function () {
+                if (city.ticket) {
+                    tickets++;
+                    city.ticket = false;
+                    display_dialogue(
+                        "You find a man with a ticket for the ship to Aretta who gives it to you after hearing of " +
+                            "your plight (and coming to a reasonable price. You walk away from the deal beaming, now " +
+                            "having " + (tickets > 0 ? tickets : "no") + " ticket" + (tickets == 1 ? "" : "s") + ".",
+                        [{text: "Onwards!", func: function () {dialogue = false;}}]
+                    );
+                } else {
+                    display_dialogue(
+                        "Several people confessed to having tickets, but none were willing to part with them for " +
+                            "any price.",
+                        [{text: "Alas.", func: function () {dialogue = false;}}]
+                    );
+                }
+            };
+            dialogue = false;
+            advancing = time + duration;
+            city_name_banner.text("Searching");
+            city_name_banner.show()
+        }});
+        if (city.friendliness > 0.5 && !daughter) {
+            options.push({text: "Enlist the locals help.", func: function () {
+                var duration = Math.random() * 8 + 4;
+                scheduled_events[time+duration] = function () {
+                    if (Math.random() < city.friendliness) {
+                        help++;
+                        display_dialogue(
+                            "Upon hearing your tale of woe, several men offered their services free of charge " +
+                                "to help you storm the inquisitorial fortress and free your daughter.",
+                            [{text: "Huzzar!", func: function () {dialogue = false;}}]
+                        );
+                    } else {
+                        display_dialogue(
+                            "It was often remarked that your tale was sad, but your pleas for help fell on deaf ears.",
+                            [{text: "Alas.", func: function () {dialogue = false;}}]
+                        );
+                    }
+                };
+                dialogue = false;
+                advancing = time + duration;
+                city_name_banner.text("Enlisting");
+                city_name_banner.show()
+            }});
+        }
+        if (city.inquisition && !daughter) {
+            options.push({text: "Raid the inquisition tower for information.", func: function () {
+                var duration = Math.random() * 10 + 8;
+                scheduled_events[time+duration] = function () {
+                    if (Math.random() > 0.8) {
+                        help += 3;
+                        display_dialogue(
+                            "The guards were asleep and the doors unlocked, you managed to get in and out before " +
+                                "anyone noticed. The plans and rotas you stole will be of great use.",
+                            [{text: "Huzzar!", func: function () {dialogue = false;}}]
+                        );
+                    } else if (Math.random() < 0.1) {
+                        help -= 5;
+                        tickets = 0;
+                        display_dialogue(
+                            "The guards caught you in the inquisitors chamber and you barely escaped with your life, " +
+                                "what's more you realise you left your satchel in the tower and they now know you're " +
+                                "coming.",
+                            [{text: "Fuck!", func: function () {dialogue = false;}}]
+                        );
+                    } else {
+                        display_dialogue(
+                            "You daren't go further than the barracks, too many guards made you fear for your life. " +
+                                "At least you weren't noticed.",
+                            [{text: "What a waste of time.", func: function () {dialogue = false;}}]
+                        );
+                    }
+                };
+                dialogue = false;
+                city.inquisition = false;
+                advancing = time + duration;
+                city_name_banner.text("Raiding");
+                city_name_banner.show()
+            }});
+        }
+        city.options = options;
+        cities.push(city);
     }
     return cities;
 }
@@ -377,3 +473,319 @@ function hours_to_date(hours) {
     return clock + " " + (afternoon ? "pm" : "am") + ", " + day_name + " the " + day + st + " of " + month
 }
 
+function display_dialogue(text, options) {
+    dialogue_banner.html("<p>" + text + "</p>");
+    for (var a in options) {
+        var link = $("<a/>", {href: "javascript:void(0)"});
+        link.html(options[a].text + "<br>");
+        link.click(options[a].func);
+        dialogue_banner.append(link);
+    }
+    dialogue = true;
+    dialogue_banner.show();
+}
+
+document.body.onload = function () {
+    renderer = new THREE.WebGLRenderer();
+    projector = new THREE.Projector();
+    voroni = new Voronoi();
+    
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+    camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 1, 1000);
+    camera.position.set(0, -60, 50);
+    camera.lookAt(new THREE.Vector3(0,0,-15));
+    
+    scene = new THREE.Scene();
+    
+    var gradient_source = document.getElementById("ground_tex");
+    var gradient_canvas = document.createElement("canvas").getContext("2d");
+    gradient_canvas.canvas.width = 256;
+    gradient_canvas.canvas.height = 1;
+    gradient_canvas.drawImage(gradient_source,0,0);
+
+    var ground = {
+        water_level: 125,
+        water_level_tex: 153,
+        gradient: gradient_canvas.getImageData(0,0,256,1).data
+    }, targets = {
+        texture: document.createElement("canvas").getContext("2d"),
+        bump: document.createElement("canvas").getContext("2d"),
+        specular: document.createElement("canvas").getContext("2d")
+    };
+    height_map = create_heightmap(targets, 512, 0.2, {x: 0, y:0}, ground, +new Date);
+    disk = create_disk(targets);
+    scene.add(disk);
+    
+    locator = new THREE.Mesh(
+        //new THREE.CylinderGeometry(0.5, 0, 1, 3, 1, false),
+        new THREE.CylinderGeometry(0, 1, 8, 3),
+        new THREE.MeshBasicMaterial({color: 0x52F00A})
+    );
+    scene.add(locator);
+    
+    cities = generate_cities(height_map, 512, 32, 10);
+    home = random_element(cities);
+    player = home;
+    while (fortress == home || fortress == undefined) {
+        fortress = random_element(cities);
+    }
+    while (port == home || port == undefined) {
+        port = random_element(cities);
+    }
+    diagram = voroni.compute(cities, {xl: -513, xr: 513, yt: -513 ,yb: 513});
+    
+    for (var n in cities) {
+        var city = cities[n];
+        var marker_colour = 0xffffff;
+        if (city.voronoiId == home.voronoiId) {
+            marker_colour = 0x46F21B;
+        } else if (city.voronoiId == fortress.voronoiId) {
+            marker_colour = 0xE85669;
+            city.options.push({text: "Free your daughter!", func: function () {
+                if (daughter) {
+                    display_dialogue(
+                        "Your daughter reminds you she is free and that you should go to the port now.",
+                        [{text: "How could I forget?.", func: function() {dialogue = false}}]
+                    );
+                } else {
+                    var chance = 0.2 + (help / 10);
+                    if (Math.random() < chance) {
+                        daughter = true;
+                        display_dialogue(
+                            "You slip into the fortress and free your daughter! It was hit and miss at times, " +
+                                "but you escape unseen and unharmed. You wish you could stop to savour the moment " +
+                                "but you know you must now get to the port.",
+                            [{text: "Time is of the essence!.", func: function() {dialogue = false}}]
+                        );
+                    } else {
+                        display_dialogue(
+                            "The inquisition catch you as you get to your daughter's cell and take the opportunity to " +
+                                "execute you there and then. You spend your last moments watching your daughter recoil " +
+                                "in terror as the inquisitor opens her cell as she is next. Game Over.",
+                            [{text: "Try Again?", func: function() {window.location = window.location}}]
+                        );
+                    }
+                }
+            }});
+        } else if (city.voronoiId == port.voronoiId) {
+            marker_colour = 0x4592D1;
+            city.options.push({text: "Board the ship", func: function () {
+                if (!daughter && tickets > 0) {
+                    display_dialogue(
+                        "Are you sure you want to leave for Aretta without your daughter?",
+                        [{text: "Yes, nothing can be done for her.", func: function () {
+                            display_dialogue(
+                                "You spend the remaining time on the ship waiting for it to sail away thinking of" +
+                                    "your daughter. Inquisitors come to the docks and hand out flyers informing you" +
+                                    "that they have killed her, leaving you grief stricken and lost. Game Over.",
+                                [{text: "Try Again?", func: function() {window.location = window.location}}]
+                            );
+                        }}, {text: "No, I must find and rescue her!", func: function () {dialogue = false;}}]
+                    );
+                } else if (daughter && tickets == 1) {
+                    display_dialogue(
+                        "The man at the gangplank refuses you entry without tickets for both you and your daughter.",
+                        [{text: "I shall board the ship without my daughter.", func: function () {
+                            display_dialogue(
+                                "The inquisition take the opportunity to seize your daughter as she cries for her " +
+                                    "betrayal from the docks and drag her away for execution leaving you grief " +
+                                    "stricken and lost at your own monstrosity. Game Over.",
+                                [{text: "Try Again?", func: function() {window.location = window.location}}]
+                            );
+                        }}, {text: "I shall send my daughter in my place.", func: function () {
+                            display_dialogue(
+                                "The inquisition take the opportunity to seize you as your daughter boards the ship. " +
+                                    "Your last days are spent in an inquisition cell awaiting your own execution, but " +
+                                    "you die knowning your daughter was safe. Game Over.",
+                                [{text: "Try Again?", func: function() {window.location = window.location}}]
+                            );
+                        }}, {
+                            text: "I must find another ticket!", 
+                            func: function () {dialogue = false;}
+                        }]
+                    );
+                } else if (daughter && tickets == 0) {
+                    display_dialogue(
+                        "The man at the gangplank refuses you entry without tickets for both you and your daughter.",
+                        [{
+                            text: "I must find more tickets!", 
+                            func: function () {dialogue = false;}
+                        }]
+                    );
+                } else if (daughter && tickets > 1) {
+                    display_dialogue(
+                        "You and your daughter board the ship together and spend the time before the ship departs in " +
+                            "relative comfort knowing you are both safe from the inquisition.",
+                        [{text: "Try Again?", func: function() {window.location = window.location}}]
+                    );
+                } else {
+                    display_dialogue(
+                        "The man at the gangplank refuses you entry without tickets.",
+                        [{
+                            text: "I must find more tickets and my daughter!", 
+                            func: function () {dialogue = false;}
+                        }]
+                    );
+                }
+            }});
+        }
+        city.neighbours = get_neighbours(city, diagram);
+        var spot = new THREE.Mesh(
+            new THREE.SphereGeometry(0.5, 4, 4),
+            new THREE.MeshBasicMaterial({color: marker_colour})
+        );
+        var pos = city.position.clone();
+        pos.multiplyScalar(50/512);
+        pos.y = -pos.y;
+        spot.position = pos;
+        scene.add(spot);
+        city.marker = spot;
+        targets.texture.fillStyle = "black";
+        targets.texture.fillRect(city.position.x+512-5,city.position.y+512-5,10,10);
+    }
+    disk.material.map.needsUpdate = true;
+
+    var light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(50,50,50);
+    scene.add(light);
+    scene.add(new THREE.AmbientLight(0x202020));
+    
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+    window.addEventListener('resize', onWindowResize, false);
+    
+    function select_city(event) {
+        var vector = new THREE.Vector3(
+            (event.clientX / window.innerWidth) * 2 - 1,
+            -(event.clientY / window.innerHeight ) * 2 + 1,
+            0.5
+        );
+        var raycaster = projector.pickingRay(vector, camera);
+        var intersections = raycaster.intersectObject(disk);
+        if (intersections.length > 0) {
+            var point = intersections[0].point;
+            point.y = -point.y;
+            point.multiplyScalar(512/50);
+            for (var c in cities) {
+                var d = point.distanceTo(cities[c].position);
+                if (d < 25) {
+                    return cities[c];
+                }
+            }
+        }
+    }
+    window.addEventListener("mousedown", function (e) {
+        if (time < advancing || dialogue) return;
+        var city = select_city(e);
+        if (city != undefined) {
+            var path = find_path(player, city, height_map);
+            advancing += follow_path(player, path, height_map);
+            player = city;
+            city_name_banner.show();
+            city_name_banner.text("Travelling to " + player.name + ", eta " + hours_to_date(advancing));
+            console.log(describe_city(player));
+            scheduled_events[advancing] = function () {
+                display_dialogue(describe_city(city), city.options.concat([
+                    {text: "Continue on your way.", func: function () {dialogue = false}}
+                ]));
+            }
+        }
+        
+    }, false);
+    window.addEventListener("mousemove", function (e) {
+        if (time < advancing || dialogue) {
+            return;
+        }
+        var city = select_city(e);
+        if (city == undefined) {
+            city_name_banner.hide();
+        } else {
+            city_name_banner.show();
+            var text = city.name;
+            if (city.voronoiId == home.voronoiId) {
+                text = "Your home city, " + text;
+            } else if (city.voronoiId == port.voronoiId) {
+                text = "Port " + text;
+            } else if (city.voronoiId == fortress.voronoiId) {
+                text = "The inquisition fortress, " + text;
+            }
+            if (city.voronoiId == player.voronoiId) {
+                text += " (You are here)";
+            } else {
+                var path = find_path(player, city, height_map);
+                var cost = follow_path(player, path, height_map);
+                text += " (" + Math.ceil(cost) + " hours away)";
+            }
+            city_name_banner.text(text);
+        }
+        
+    }, false);
+
+    function animate() {
+        requestAnimationFrame(animate);
+        if (time < advancing && !dialogue) {
+            var t = time;
+            if (advancing - time < 1/20) {
+                time = advancing;
+                city_name_banner.hide();
+            } else {
+                time += (advancing - time) / 60;
+            }
+            for (var e in scheduled_events) {
+                if (e > t && time >= e) {
+                    scheduled_events[e]();
+                }
+            }
+        }
+        light.position.set(
+                Math.sin(Math.PI*2/24*(time-4)) * 50,
+                50,
+                Math.cos(Math.PI*2/24*(time-4)) * 50
+        );
+        locator.position.set(player.x*50/512, -player.y*50/512, 8);
+        locator.rotateY(0.01);
+        renderer.render(scene, camera);
+        status_banner.text(hours_to_date(time));
+        if (!dialogue) dialogue_banner.hide();
+    }
+    animate();
+    
+    scheduled_events[30 * 24] = function () {
+        display_dialogue(
+            "The realisation that all is lost slowly dawns on you. The last ship to Aretta has sailed" +
+                (!daughter ? " and your only daughter will likely be burned at the stake for your sins" : "") +
+                ". The inquisition will find you eventually and burn you " + (daughter ? "and your daughter" : "too") + 
+                ", your flight more than proof to them of your guilt. Game Over.",
+            [{text: "Try Again?", func: function() {window.location = window.location}}]
+        );
+    };
+    
+    display_dialogue(
+        "It was late evening on Saturday the 10th of February and there had been a knock at your door, " +
+        "outside stood a number of large men who said they needed to speak with you. You said you were " +
+        "busy but they pressed the matter so you let them in. This was the first mistake. They were from " +
+        "the inquisition, you had been accused of heresy and were instructed to make your way to the " +
+        "inquisition fortress of " + fortress.name + " by " + hours_to_date(24 * 30) + ". To ensure your " +
+        "cooperation they took your daughter, your one and only remaining family member, hostage. If you " +
+        "didn't submit yourself, they would take this as proof of your guilt and punish her in your stead.",
+        [
+            {text: "Continue", func: function () {
+                display_dialogue(
+                    "Once the inquisition had left, there was a second knock at the door. This time it was " +
+                    "the local lord. He told you he had no love of the inquisition and was willing to offer " +
+                    "you safe passage to Aretta on a boat leaving from Port " + port.name + ". However, no " +
+                    "natter how much you begged he could not, or would not, offer you a second ticket. It " +
+                    "was too dangerous, he said. Just get to " + port.name + ". Once the lord had left, you " +
+                    "began to pack your things. You had to rescue your daughter from the fortress, but did " +
+                    "not know how even to begin. You needed another ticket, found from somewhere. And you " +
+                    "needed to make your way to " + port.name + ", all before " + hours_to_date(24 * 30) + ".",
+                    [{text: "Let's go", func: function () {dialogue = false}}]
+                )
+            }}
+        ]
+    );
+}
